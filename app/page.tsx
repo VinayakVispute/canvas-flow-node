@@ -3,7 +3,6 @@
 import { useState, useCallback, useRef, useEffect, DragEvent } from "react";
 import {
   ReactFlow,
-  applyNodeChanges,
   Background,
   Controls,
   useReactFlow,
@@ -11,9 +10,14 @@ import {
   type NodeChange,
   type Node,
   type NodeTypes,
+  type OnSelectionChangeParams,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { ImageNode, type ImageNodeData } from "@/components/image-node";
+import {
+  ImageNode,
+  type ImageNodeData,
+  type ImageNodeType,
+} from "@/components/image-node";
 import {
   TextNode,
   type TextNodeData,
@@ -21,7 +25,14 @@ import {
 } from "@/components/text-node";
 import { CanvasToolbar } from "@/components/canvas-toolbar";
 import { DrawingLayer, useDrawingStore } from "@/components/drawing-layer";
+import { useCanvasStore } from "@/lib/stores/canvas-store";
+import type { CanvasSnapshot } from "@/lib/stores/history-types";
 import { extractImageMetadata, fileToBase64 } from "@/lib/image-utils";
+import {
+  downloadBlob,
+  exportImageWithDrawings,
+  getExportFilename,
+} from "@/lib/export-utils";
 
 const DEFAULT_IMAGE_URL =
   "https://d2weamipq0hk4d.cloudfront.net/assets/asset_1762153343464.webp";
@@ -32,13 +43,40 @@ const nodeTypes: NodeTypes = {
 };
 
 function FlowCanvas() {
-  const [nodes, setNodes] = useState<Node[]>([]);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [selectedImageNodes, setSelectedImageNodes] = useState<ImageNodeType[]>(
+    []
+  );
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, getNode } = useReactFlow();
+  const dragStartSnapshot = useRef<CanvasSnapshot | null>(null);
+  const resizeStartSnapshot = useRef<CanvasSnapshot | null>(null);
+  const isResizing = useRef(false);
+
+  const {
+    nodes,
+    setNodes,
+    applyNodeChanges,
+    addNodes,
+    getSnapshot,
+    pushHistory,
+    undo,
+    redo,
+    strokes,
+  } = useCanvasStore();
 
   // Drawing state
-  const { isDrawingMode, layerPosition, undo, redo } = useDrawingStore();
+  const {
+    isDrawingMode,
+    layerPosition,
+    cursorMode,
+    isSpaceHeld,
+    setCursorMode,
+    setSpaceHeld,
+    selectedStrokeIds,
+    deleteSelectedStrokes,
+    deselectAllStrokes,
+  } = useDrawingStore();
 
   // Initialize with default image node
   useEffect(() => {
@@ -82,19 +120,67 @@ function FlowCanvas() {
     };
 
     initializeDefaultNode();
-  }, []);
+  }, [setNodes]);
 
   const onNodesChange = useCallback(
-    (changes: NodeChange[]) =>
-      setNodes((nds) => applyNodeChanges(changes, nds)),
+    (changes: NodeChange[]) => {
+      const hasResize = changes.some((change) => change.type === "dimensions");
+      if (hasResize && !isResizing.current) {
+        resizeStartSnapshot.current = getSnapshot();
+        isResizing.current = true;
+      }
+      applyNodeChanges(changes);
+    },
+    [applyNodeChanges, getSnapshot]
+  );
+
+  const onNodeDragStart = useCallback(() => {
+    dragStartSnapshot.current = getSnapshot();
+  }, [getSnapshot]);
+
+  const onNodeDragStop = useCallback(
+    (_event: unknown, node: Node) => {
+      if (!dragStartSnapshot.current) return;
+
+      const previousNode = dragStartSnapshot.current.nodes.find(
+        (prevNode) => prevNode.id === node.id
+      );
+      const positionChanged =
+        !previousNode ||
+        previousNode.position.x !== node.position.x ||
+        previousNode.position.y !== node.position.y;
+
+      if (positionChanged) {
+        pushHistory("node_move", dragStartSnapshot.current);
+      }
+
+      dragStartSnapshot.current = null;
+    },
+    [pushHistory]
+  );
+
+  const onSelectionChange = useCallback(
+    ({ nodes: selectedNodes }: OnSelectionChangeParams) => {
+      const imageNodes = selectedNodes.filter(
+        (node) => node.type === "image"
+      ) as ImageNodeType[];
+      setSelectedImageNodes(imageNodes);
+    },
     []
   );
 
-  // Keyboard shortcuts for drawing undo/redo
+  // Keyboard shortcuts for drawing undo/redo (works in both drawing and pointer mode)
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      // Only handle shortcuts when in drawing mode
-      if (!isDrawingMode) return;
+      // Don't trigger if typing in an input or contenteditable
+      const target = event.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      ) {
+        return;
+      }
 
       // Check for Ctrl/Cmd + Z (Undo) or Ctrl/Cmd + Shift + Z (Redo)
       const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
@@ -118,7 +204,76 @@ function FlowCanvas() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isDrawingMode, undo, redo]);
+  }, [undo, redo]);
+
+  // Capture resize end to push history once
+  useEffect(() => {
+    const handlePointerUp = () => {
+      if (isResizing.current && resizeStartSnapshot.current) {
+        pushHistory("node_resize", resizeStartSnapshot.current);
+      }
+      isResizing.current = false;
+      resizeStartSnapshot.current = null;
+    };
+
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => window.removeEventListener("pointerup", handlePointerUp);
+  }, [pushHistory]);
+
+  // Space bar for temporary grab mode
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Don't trigger if typing in an input or contenteditable
+      const target = event.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      ) {
+        return;
+      }
+
+      if (event.code === "Space" && !event.repeat) {
+        event.preventDefault();
+        setSpaceHeld(true);
+      }
+    };
+
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.code === "Space") {
+        setSpaceHeld(false);
+      }
+    };
+
+    // Also release space on window blur (e.g., switching tabs)
+    const handleBlur = () => {
+      setSpaceHeld(false);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", handleBlur);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, [setSpaceHeld]);
+
+  // Delete selected strokes
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Delete" || event.key === "Backspace") {
+        if (selectedStrokeIds.length > 0) {
+          event.preventDefault();
+          deleteSelectedStrokes();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedStrokeIds, deleteSelectedStrokes]);
 
   const handleAddText = useCallback(() => {
     const newNode: Node<TextNodeData> = {
@@ -134,8 +289,56 @@ function FlowCanvas() {
       },
     };
 
-    setNodes((nds) => [...nds, newNode]);
-  }, []);
+    addNodes([newNode]);
+  }, [addNodes]);
+
+  const resolveNodeSize = (node: ImageNodeType) => {
+    const width =
+      typeof node.width === "number"
+        ? node.width
+        : typeof node.style?.width === "number"
+        ? node.style.width
+        : Number.parseFloat(String(node.style?.width || ""));
+    const height =
+      typeof node.height === "number"
+        ? node.height
+        : typeof node.style?.height === "number"
+        ? node.style.height
+        : Number.parseFloat(String(node.style?.height || ""));
+
+    return {
+      width: Number.isFinite(width) ? width : node.data.metadata.width,
+      height: Number.isFinite(height) ? height : node.data.metadata.height,
+    };
+  };
+
+  const handleExportSelected = useCallback(async () => {
+    if (selectedImageNodes.length === 0) return;
+
+    for (const node of selectedImageNodes) {
+      const liveNode = getNode(node.id);
+      const nodePosition = liveNode?.position ??
+        node.position ?? { x: 0, y: 0 };
+      const nodeSize = resolveNodeSize(node);
+
+      const blob = await exportImageWithDrawings({
+        imageUrl: node.data.imageUrl,
+        imagePosition: nodePosition,
+        imageSize: nodeSize,
+        originalSize: {
+          width: node.data.metadata.width,
+          height: node.data.metadata.height,
+        },
+        strokes,
+      });
+
+      if (blob) {
+        downloadBlob(blob, getExportFilename(node.data.metadata.name));
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+  }, [selectedImageNodes, strokes, getNode]);
 
   const onDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -178,6 +381,8 @@ function FlowCanvas() {
         x: event.clientX,
         y: event.clientY,
       });
+
+      const newNodes: Node<ImageNodeData>[] = [];
 
       // Process each dropped image
       for (let i = 0; i < imageFiles.length; i++) {
@@ -222,25 +427,58 @@ function FlowCanvas() {
             },
           };
 
-          setNodes((nds) => [...nds, newNode]);
+          newNodes.push(newNode);
         } catch (error) {
           console.error("Failed to process dropped image:", error);
         }
       }
+
+      if (newNodes.length > 0) {
+        addNodes(newNodes);
+      }
     },
-    [screenToFlowPosition]
+    [screenToFlowPosition, addNodes]
   );
+
+  const effectiveMode = isSpaceHeld ? "grab" : cursorMode;
+
+  const handleToggleCursorMode = useCallback(() => {
+    setCursorMode(cursorMode === "pointer" ? "grab" : "pointer");
+  }, [cursorMode, setCursorMode]);
+
+  // Deselect strokes when clicking on empty canvas area
+  const handlePaneClick = useCallback(() => {
+    if (selectedStrokeIds.length > 0) {
+      deselectAllStrokes();
+    }
+  }, [selectedStrokeIds, deselectAllStrokes]);
+
+  // Determine wrapper cursor based on current mode
+  const wrapperCursor = isDrawingMode
+    ? "crosshair"
+    : effectiveMode === "grab"
+    ? "grab"
+    : "default";
 
   return (
     <div
       ref={reactFlowWrapper}
       className="relative h-screen w-screen"
+      style={{ cursor: wrapperCursor }}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
       {/* Canvas Toolbar */}
-      <CanvasToolbar onAddText={handleAddText} />
+      <CanvasToolbar
+        onAddText={handleAddText}
+        onExportSelected={handleExportSelected}
+        selectedImageCount={selectedImageNodes.length}
+        cursorMode={cursorMode}
+        isSpaceHeld={isSpaceHeld}
+        isDrawingMode={isDrawingMode}
+        onToggleCursorMode={handleToggleCursorMode}
+      />
 
       {/* Drop Zone Overlay */}
       {isDraggingOver && (
@@ -260,15 +498,19 @@ function FlowCanvas() {
         nodes={nodes}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
+        onSelectionChange={onSelectionChange}
+        onPaneClick={handlePaneClick}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDragStop={onNodeDragStop}
         fitView
         fitViewOptions={{ padding: 0.2 }}
         className="bg-background"
         proOptions={{ hideAttribution: true }}
         // Disable pan and selection when in drawing mode
-        panOnDrag={!isDrawingMode}
-        selectionOnDrag={!isDrawingMode}
+        panOnDrag={effectiveMode === "grab" || isDrawingMode}
+        selectionOnDrag={effectiveMode === "pointer" && !isDrawingMode}
         // Prevent node dragging when in drawing mode
-        nodesDraggable={!isDrawingMode}
+        nodesDraggable={effectiveMode === "pointer" && !isDrawingMode}
       >
         <Background />
         <DrawingLayer position={layerPosition} />

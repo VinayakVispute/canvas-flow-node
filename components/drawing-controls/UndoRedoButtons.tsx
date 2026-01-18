@@ -23,7 +23,7 @@ export function UndoRedoButtons({
         size="icon"
         onClick={onUndo}
         disabled={!canUndo}
-        aria-label="Undo last stroke"
+        aria-label="Undo last action"
         title="Undo (Ctrl+Z)"
         className="h-8 w-8"
       >
@@ -34,7 +34,7 @@ export function UndoRedoButtons({
         size="icon"
         onClick={onRedo}
         disabled={!canRedo}
-        aria-label="Redo last stroke"
+        aria-label="Redo last action"
         title="Redo (Ctrl+Shift+Z)"
         className="h-8 w-8"
       >

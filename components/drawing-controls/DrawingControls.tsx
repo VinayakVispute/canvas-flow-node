@@ -6,6 +6,7 @@ import {
   WIDTH_OPTIONS,
   useDrawingStore,
 } from "@/components/drawing-layer";
+import { useCanvasStore } from "@/lib/stores/canvas-store";
 import { DrawingModeToggle } from "./DrawingModeToggle";
 import { ColorPicker } from "./ColorPicker";
 import { StrokeWidthPicker } from "./StrokeWidthPicker";
@@ -23,17 +24,18 @@ export function DrawingControls() {
     setStrokeWidth,
     layerPosition,
     setLayerPosition,
-    undo,
-    redo,
-    clearAll,
-    strokes,
-    undoStack,
-    redoStack,
+    deselectAllStrokes,
   } = useDrawingStore();
+  const { strokes, undo, redo, canUndo, canRedo, clearStrokes } =
+    useCanvasStore();
 
-  const canUndo = undoStack.length > 0;
-  const canRedo = redoStack.length > 0;
+  const hasUndo = canUndo();
+  const hasRedo = canRedo();
   const hasStrokes = strokes.length > 0;
+  const handleClear = () => {
+    clearStrokes();
+    deselectAllStrokes();
+  };
 
   return (
     <div className="flex items-center gap-2">
@@ -72,13 +74,13 @@ export function DrawingControls() {
           <Separator orientation="vertical" className="h-6" />
 
           <UndoRedoButtons
-            canUndo={canUndo}
-            canRedo={canRedo}
+            canUndo={hasUndo}
+            canRedo={hasRedo}
             onUndo={undo}
             onRedo={redo}
           />
 
-          <ClearButton disabled={!hasStrokes} onClear={clearAll} />
+          <ClearButton disabled={!hasStrokes} onClear={handleClear} />
         </>
       )}
     </div>

@@ -1,10 +1,10 @@
 "use client";
 
 import { memo, useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { useReactFlow } from "@xyflow/react";
 import { TextFormatToolbar } from "./TextFormatToolbar";
 import type { TextNodeData, TextFormatting } from "./types";
 import { defaultFormatting } from "./types";
+import { useCanvasStore } from "@/lib/stores/canvas-store";
 
 interface TextNodeComponentProps {
   id: string;
@@ -16,7 +16,7 @@ function TextNodeComponent({ id, data, selected }: TextNodeComponentProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [text, setText] = useState(data.text);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { setNodes } = useReactFlow();
+  const updateNodeData = useCanvasStore((state) => state.updateNodeData);
 
   const formatting = useMemo(
     () => data.formatting || defaultFormatting,
@@ -50,30 +50,17 @@ function TextNodeComponent({ id, data, selected }: TextNodeComponentProps) {
     setIsEditing(true);
   }, []);
 
-  const updateNodeData = useCallback(
+  const applyNodeDataUpdates = useCallback(
     (updates: Partial<TextNodeData>) => {
-      setNodes((nodes) =>
-        nodes.map((node) => {
-          if (node.id === id) {
-            return {
-              ...node,
-              data: {
-                ...node.data,
-                ...updates,
-              },
-            };
-          }
-          return node;
-        })
-      );
+      updateNodeData(id, updates);
     },
-    [id, setNodes]
+    [id, updateNodeData]
   );
 
   const handleBlur = useCallback(() => {
     setIsEditing(false);
-    updateNodeData({ text: text || "Double-click to edit" });
-  }, [text, updateNodeData]);
+    applyNodeDataUpdates({ text: text || "Double-click to edit" });
+  }, [text, applyNodeDataUpdates]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -98,11 +85,11 @@ function TextNodeComponent({ id, data, selected }: TextNodeComponentProps) {
 
   const handleFormattingChange = useCallback(
     (newFormatting: Partial<TextFormatting>) => {
-      updateNodeData({
+      applyNodeDataUpdates({
         formatting: { ...formatting, ...newFormatting },
       });
     },
-    [formatting, updateNodeData]
+    [formatting, applyNodeDataUpdates]
   );
 
   const textStyle: React.CSSProperties = {

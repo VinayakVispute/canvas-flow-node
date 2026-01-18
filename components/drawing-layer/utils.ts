@@ -1,4 +1,4 @@
-import type { Point } from "./types";
+import type { Point, Stroke } from "./types";
 
 /**
  * Convert an array of points to a smooth SVG path using quadratic bezier curves.
@@ -85,6 +85,92 @@ export function distance(p1: Point, p2: Point): number {
   const dx = p2.x - p1.x;
   const dy = p2.y - p1.y;
   return Math.sqrt(dx * dx + dy * dy);
+}
+
+function distancePointToSegment(
+  point: Point,
+  start: Point,
+  end: Point
+): number {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+
+  if (lengthSquared === 0) {
+    return distance(point, start);
+  }
+
+  const t =
+    ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared;
+  const clampedT = Math.max(0, Math.min(1, t));
+
+  const projection = {
+    x: start.x + clampedT * dx,
+    y: start.y + clampedT * dy,
+  };
+
+  return distance(point, projection);
+}
+
+export function isPointNearStroke(
+  point: Point,
+  stroke: Stroke,
+  tolerance: number
+): boolean {
+  if (stroke.points.length === 0) return false;
+  if (stroke.points.length === 1) {
+    return distance(point, stroke.points[0]) <= tolerance;
+  }
+
+  for (let i = 0; i < stroke.points.length - 1; i++) {
+    const start = stroke.points[i];
+    const end = stroke.points[i + 1];
+    if (distancePointToSegment(point, start, end) <= tolerance) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function findStrokeAtPoint(
+  point: Point,
+  strokes: Stroke[],
+  tolerance: number
+): Stroke | null {
+  for (let i = strokes.length - 1; i >= 0; i--) {
+    const stroke = strokes[i];
+    if (isPointNearStroke(point, stroke, tolerance + stroke.width / 2)) {
+      return stroke;
+    }
+  }
+
+  return null;
+}
+
+export function getStrokeBounds(stroke: Stroke): {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+} {
+  if (stroke.points.length === 0) {
+    return { x: 0, y: 0, width: 0, height: 0 };
+  }
+
+  let minX = stroke.points[0].x;
+  let minY = stroke.points[0].y;
+  let maxX = stroke.points[0].x;
+  let maxY = stroke.points[0].y;
+
+  stroke.points.forEach((point) => {
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+  });
+
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
 /**

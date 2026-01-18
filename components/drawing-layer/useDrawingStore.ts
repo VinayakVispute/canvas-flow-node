@@ -1,9 +1,6 @@
 import { create } from "zustand";
-import type {
-  DrawingStore,
-  Point,
-  Stroke,
-} from "./types";
+import { useCanvasStore } from "@/lib/stores/canvas-store";
+import type { DrawingStore, Point, Stroke } from "./types";
 import {
   DEFAULT_STROKE_COLOR,
   DEFAULT_STROKE_WIDTH,
@@ -13,13 +10,13 @@ import {
 export const useDrawingStore = create<DrawingStore>((set, get) => ({
   // Initial state
   isDrawingMode: false,
+  cursorMode: "pointer",
+  isSpaceHeld: false,
   currentStroke: null,
-  strokes: [],
   strokeColor: DEFAULT_STROKE_COLOR,
   strokeWidth: DEFAULT_STROKE_WIDTH,
   layerPosition: DEFAULT_LAYER_POSITION,
-  undoStack: [],
-  redoStack: [],
+  selectedStrokeIds: [],
 
   // Mode toggle
   setDrawingMode: (enabled) => set({ isDrawingMode: enabled }),
@@ -56,14 +53,8 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
       width: state.strokeWidth,
     };
 
-    set({
-      strokes: [...state.strokes, newStroke],
-      currentStroke: null,
-      // Save current strokes to undo stack before adding new stroke
-      undoStack: [...state.undoStack, state.strokes],
-      // Clear redo stack when new action is performed
-      redoStack: [],
-    });
+    useCanvasStore.getState().addStroke(newStroke);
+    set({ currentStroke: null });
   },
 
   // Styling
@@ -74,50 +65,44 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
   // Layer position
   setLayerPosition: (position) => set({ layerPosition: position }),
 
-  // Undo
-  undo: () => {
-    const state = get();
-    if (state.undoStack.length === 0) return;
+  // Cursor mode
+  setCursorMode: (mode) => set({ cursorMode: mode }),
 
-    const previousStrokes = state.undoStack[state.undoStack.length - 1];
-    const newUndoStack = state.undoStack.slice(0, -1);
+  setSpaceHeld: (held) => set({ isSpaceHeld: held }),
 
-    set({
-      strokes: previousStrokes,
-      undoStack: newUndoStack,
-      redoStack: [...state.redoStack, state.strokes],
+  // Selection
+  selectStroke: (id, addToSelection = false) => {
+    set((state) => {
+      if (addToSelection) {
+        const alreadySelected = state.selectedStrokeIds.includes(id);
+        return {
+          selectedStrokeIds: alreadySelected
+            ? state.selectedStrokeIds.filter((selectedId) => selectedId !== id)
+            : [...state.selectedStrokeIds, id],
+        };
+      }
+
+      return { selectedStrokeIds: [id] };
     });
   },
 
-  // Redo
-  redo: () => {
+  setSelectedStrokeIds: (ids) => set({ selectedStrokeIds: ids }),
+
+  deselectAllStrokes: () => set({ selectedStrokeIds: [] }),
+
+  deleteSelectedStrokes: () => {
     const state = get();
-    if (state.redoStack.length === 0) return;
+    if (state.selectedStrokeIds.length === 0) return;
 
-    const nextStrokes = state.redoStack[state.redoStack.length - 1];
-    const newRedoStack = state.redoStack.slice(0, -1);
-
-    set({
-      strokes: nextStrokes,
-      undoStack: [...state.undoStack, state.strokes],
-      redoStack: newRedoStack,
-    });
+    useCanvasStore.getState().deleteStrokes(state.selectedStrokeIds);
+    set({ selectedStrokeIds: [] });
   },
 
-  canUndo: () => get().undoStack.length > 0,
-
-  canRedo: () => get().redoStack.length > 0,
-
-  // Clear all strokes
-  clearAll: () => {
+  moveSelectedStrokes: (deltaX, deltaY) => {
     const state = get();
-    if (state.strokes.length === 0) return;
-
-    set({
-      strokes: [],
-      currentStroke: null,
-      undoStack: [...state.undoStack, state.strokes],
-      redoStack: [],
-    });
+    if (state.selectedStrokeIds.length === 0) return;
+    useCanvasStore
+      .getState()
+      .moveStrokes(state.selectedStrokeIds, deltaX, deltaY);
   },
 }));

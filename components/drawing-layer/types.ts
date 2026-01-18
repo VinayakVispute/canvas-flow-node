@@ -11,16 +11,16 @@ export interface Stroke {
 }
 
 export type LayerPosition = "above" | "below";
+export type CursorMode = "pointer" | "grab";
 
 export interface DrawingState {
   // Drawing mode
   isDrawingMode: boolean;
+  cursorMode: CursorMode;
+  isSpaceHeld: boolean;
 
   // Current stroke being drawn
   currentStroke: Point[] | null;
-
-  // Completed strokes
-  strokes: Stroke[];
 
   // Styling
   strokeColor: string;
@@ -29,9 +29,8 @@ export interface DrawingState {
   // Layer position relative to nodes
   layerPosition: LayerPosition;
 
-  // Undo/Redo stacks (store snapshots of strokes array)
-  undoStack: Stroke[][];
-  redoStack: Stroke[][];
+  // Selection
+  selectedStrokeIds: string[];
 }
 
 export interface DrawingActions {
@@ -51,14 +50,16 @@ export interface DrawingActions {
   // Layer position
   setLayerPosition: (position: LayerPosition) => void;
 
-  // Undo/Redo
-  undo: () => void;
-  redo: () => void;
-  canUndo: () => boolean;
-  canRedo: () => boolean;
+  // Cursor mode
+  setCursorMode: (mode: CursorMode) => void;
+  setSpaceHeld: (held: boolean) => void;
 
-  // Clear
-  clearAll: () => void;
+  // Selection
+  selectStroke: (id: string, addToSelection?: boolean) => void;
+  setSelectedStrokeIds: (ids: string[]) => void;
+  deselectAllStrokes: () => void;
+  deleteSelectedStrokes: () => void;
+  moveSelectedStrokes: (deltaX: number, deltaY: number) => void;
 }
 
 export type DrawingStore = DrawingState & DrawingActions;

@@ -1,18 +1,33 @@
 "use client";
 
 import { memo, useState } from "react";
-import { NodeResizer } from "@xyflow/react";
+import { NodeResizer, type NodeProps, useInternalNode } from "@xyflow/react";
 import { ImageNodeToolbar } from "./ImageNodeToolbar";
 import { FullScreenView } from "./FullScreenView";
-import type { ImageNodeData } from "./types";
+import type { ImageNodeData, ImageNodeType } from "./types";
 
-interface ImageNodeComponentProps {
-  data: ImageNodeData;
-  selected?: boolean;
+type ImageNodeComponentProps = NodeProps<ImageNodeType>;
+
+function normalizeSize(value?: number | string): number | undefined {
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
 }
 
-function ImageNodeComponent({ data, selected }: ImageNodeComponentProps) {
+function ImageNodeComponent({ data, selected, id }: ImageNodeComponentProps) {
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const internalNode = useInternalNode(id);
+  const nodePosition = internalNode?.internals.positionAbsolute ?? {
+    x: 0,
+    y: 0,
+  };
+  const displayWidth =
+    normalizeSize(internalNode?.width) ?? data.metadata.width;
+  const displayHeight =
+    normalizeSize(internalNode?.height) ?? data.metadata.height;
 
   return (
     <>
@@ -28,6 +43,9 @@ function ImageNodeComponent({ data, selected }: ImageNodeComponentProps) {
       <ImageNodeToolbar
         imageUrl={data.imageUrl}
         metadata={data.metadata}
+        nodeId={id}
+        nodePosition={nodePosition}
+        nodeSize={{ width: displayWidth, height: displayHeight }}
         onExpand={() => setIsFullScreen(true)}
       />
 
