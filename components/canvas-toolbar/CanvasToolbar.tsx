@@ -2,6 +2,8 @@
 
 import { Type } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { DrawingControls } from "@/components/drawing-controls";
 
 interface CanvasToolbarProps {
   onAddText: () => void;
@@ -9,7 +11,7 @@ interface CanvasToolbarProps {
 
 export function CanvasToolbar({ onAddText }: CanvasToolbarProps) {
   return (
-    <div className="absolute left-4 top-4 z-10 flex gap-2 rounded-lg border bg-background p-2 shadow-md">
+    <div className="absolute left-4 top-4 z-10 flex items-center gap-2 rounded-lg border bg-background p-2 shadow-md">
       <Button
         variant="outline"
         size="sm"
@@ -21,6 +23,11 @@ export function CanvasToolbar({ onAddText }: CanvasToolbarProps) {
         <Type className="h-4 w-4" />
         <span>Add Text</span>
       </Button>
+
+      <Separator orientation="vertical" className="h-6" />
+
+      {/* Drawing Controls */}
+      <DrawingControls />
     </div>
   );
 }

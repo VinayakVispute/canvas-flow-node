@@ -20,6 +20,7 @@ import {
   defaultFormatting,
 } from "@/components/text-node";
 import { CanvasToolbar } from "@/components/canvas-toolbar";
+import { DrawingLayer, useDrawingStore } from "@/components/drawing-layer";
 import { extractImageMetadata, fileToBase64 } from "@/lib/image-utils";
 
 const DEFAULT_IMAGE_URL =
@@ -35,6 +36,9 @@ function FlowCanvas() {
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition } = useReactFlow();
+
+  // Drawing state
+  const { isDrawingMode, layerPosition, undo, redo } = useDrawingStore();
 
   // Initialize with default image node
   useEffect(() => {
@@ -85,6 +89,36 @@ function FlowCanvas() {
       setNodes((nds) => applyNodeChanges(changes, nds)),
     []
   );
+
+  // Keyboard shortcuts for drawing undo/redo
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Only handle shortcuts when in drawing mode
+      if (!isDrawingMode) return;
+
+      // Check for Ctrl/Cmd + Z (Undo) or Ctrl/Cmd + Shift + Z (Redo)
+      const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+      const modifierKey = isMac ? event.metaKey : event.ctrlKey;
+
+      if (modifierKey && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) {
+          redo();
+        } else {
+          undo();
+        }
+      }
+
+      // Also support Ctrl/Cmd + Y for Redo (Windows convention)
+      if (modifierKey && event.key.toLowerCase() === "y") {
+        event.preventDefault();
+        redo();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isDrawingMode, undo, redo]);
 
   const handleAddText = useCallback(() => {
     const newNode: Node<TextNodeData> = {
@@ -230,8 +264,14 @@ function FlowCanvas() {
         fitViewOptions={{ padding: 0.2 }}
         className="bg-background"
         proOptions={{ hideAttribution: true }}
+        // Disable pan and selection when in drawing mode
+        panOnDrag={!isDrawingMode}
+        selectionOnDrag={!isDrawingMode}
+        // Prevent node dragging when in drawing mode
+        nodesDraggable={!isDrawingMode}
       >
         <Background />
+        <DrawingLayer position={layerPosition} />
         <Controls />
       </ReactFlow>
     </div>
