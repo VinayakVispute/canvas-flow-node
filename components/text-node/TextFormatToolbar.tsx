@@ -4,14 +4,11 @@ import { NodeToolbar } from "@xyflow/react";
 import {
   Bold,
   Italic,
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
   Minus,
   Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { TextFormatting, TextAlignment } from "./types";
+import { FONT_FAMILIES, type TextFormatting } from "./types";
 
 interface TextFormatToolbarProps {
   formatting: TextFormatting;
@@ -40,10 +37,6 @@ export function TextFormatToolbar({
     const currentIndex = FONT_SIZES.indexOf(formatting.fontSize);
     const newIndex = Math.max(0, Math.min(FONT_SIZES.length - 1, currentIndex + delta));
     onFormattingChange({ fontSize: FONT_SIZES[newIndex] });
-  };
-
-  const handleAlignmentChange = (alignment: TextAlignment) => {
-    onFormattingChange({ alignment });
   };
 
   return (
@@ -99,38 +92,21 @@ export function TextFormatToolbar({
         </Button>
       </div>
 
-      {/* Alignment */}
-      <div className="flex items-center gap-0.5 border-r pr-2">
-        <Button
-          variant={formatting.alignment === "left" ? "secondary" : "ghost"}
-          size="icon"
-          className="h-7 w-7 transition-colors"
-          onClick={() => handleAlignmentChange("left")}
-          aria-label="Align left"
-          title="Align left"
+      {/* Font Family */}
+      <div className="flex items-center gap-1 border-r pr-2">
+        <select
+          className="h-7 rounded-md border bg-background px-2 text-xs"
+          value={formatting.fontFamily}
+          onChange={(event) => onFormattingChange({ fontFamily: event.target.value })}
+          aria-label="Font family"
+          title="Font family"
         >
-          <AlignLeft className="h-3.5 w-3.5" />
-        </Button>
-        <Button
-          variant={formatting.alignment === "center" ? "secondary" : "ghost"}
-          size="icon"
-          className="h-7 w-7 transition-colors"
-          onClick={() => handleAlignmentChange("center")}
-          aria-label="Align center"
-          title="Align center"
-        >
-          <AlignCenter className="h-3.5 w-3.5" />
-        </Button>
-        <Button
-          variant={formatting.alignment === "right" ? "secondary" : "ghost"}
-          size="icon"
-          className="h-7 w-7 transition-colors"
-          onClick={() => handleAlignmentChange("right")}
-          aria-label="Align right"
-          title="Align right"
-        >
-          <AlignRight className="h-3.5 w-3.5" />
-        </Button>
+          {FONT_FAMILIES.map((font) => (
+            <option key={font.value} value={font.value}>
+              {font.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Color Picker */}

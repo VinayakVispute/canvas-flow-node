@@ -29,7 +29,7 @@ export function ImageNodeToolbar({
   nodeSize,
   onExpand,
 }: ImageNodeToolbarProps) {
-  const { strokes } = useCanvasStore();
+  const { strokes, nodes } = useCanvasStore();
   const { getNode } = useReactFlow();
   const internalNode = useInternalNode(nodeId);
 
@@ -85,6 +85,7 @@ export function ImageNodeToolbar({
       imageSize: safeSize,
       originalSize: { width: metadata.width, height: metadata.height },
       strokes,
+      nodes,
     });
 
     if (blob) {

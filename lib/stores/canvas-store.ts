@@ -1,5 +1,12 @@
 import { create } from "zustand";
-import { applyNodeChanges, type Node, type NodeChange } from "@xyflow/react";
+import {
+  applyEdgeChanges,
+  applyNodeChanges,
+  type Edge,
+  type EdgeChange,
+  type Node,
+  type NodeChange,
+} from "@xyflow/react";
 import type { Stroke } from "@/components/drawing-layer";
 import type {
   CanvasSnapshot,
@@ -11,17 +18,23 @@ const MAX_HISTORY_SIZE = 50;
 
 interface CanvasStoreState {
   nodes: Node[];
+  edges: Edge[];
   strokes: Stroke[];
   undoStack: HistoryEntry[];
   redoStack: HistoryEntry[];
+  clipboard: Node[];
 }
 
 interface CanvasStoreActions {
   setNodes: (nodes: Node[]) => void;
+  setEdges: (edges: Edge[]) => void;
   applyNodeChanges: (changes: NodeChange[]) => void;
+  applyEdgeChanges: (changes: EdgeChange[]) => void;
   addNodes: (nodes: Node[]) => void;
   deleteNodes: (nodeIds: string[]) => void;
   updateNodeData: (nodeId: string, updates: Record<string, unknown>) => void;
+  copyNodes: (nodeIds: string[]) => void;
+  pasteNodes: (viewportCenter: { x: number; y: number }) => void;
 
   setStrokes: (strokes: Stroke[]) => void;
   addStroke: (stroke: Stroke) => void;
@@ -31,6 +44,17 @@ interface CanvasStoreActions {
 
   getSnapshot: () => CanvasSnapshot;
   pushHistory: (type: HistoryActionType, snapshot?: CanvasSnapshot) => void;
+  exportCanvas: () => {
+    version: string;
+    nodes: Node[];
+    edges: Edge[];
+    strokes: Stroke[];
+  };
+  importCanvas: (data: {
+    nodes: Node[];
+    edges?: Edge[];
+    strokes?: Stroke[];
+  }) => void;
   undo: () => void;
   redo: () => void;
   canUndo: () => boolean;
@@ -70,11 +94,14 @@ const withHistoryUpdate = (
 
 export const useCanvasStore = create<CanvasStore>((set, get) => ({
   nodes: [],
+  edges: [],
   strokes: [],
   undoStack: [],
   redoStack: [],
+  clipboard: [],
 
   setNodes: (nodes) => set({ nodes }),
+  setEdges: (edges) => set({ edges }),
 
   applyNodeChanges: (changes) => {
     set((state) => {
@@ -93,6 +120,12 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
 
       return { nodes: nextNodes };
     });
+  },
+
+  applyEdgeChanges: (changes) => {
+    set((state) => ({
+      edges: applyEdgeChanges(changes, state.edges),
+    }));
   },
 
   addNodes: (nodes) =>
@@ -127,6 +160,51 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
           : node
       ),
     })),
+
+  copyNodes: (nodeIds) =>
+    set((state) => ({
+      clipboard: state.nodes.filter((node) => nodeIds.includes(node.id)),
+    })),
+
+  pasteNodes: (viewportCenter) =>
+    set((state) => {
+      if (state.clipboard.length === 0) return state;
+
+      const minX = Math.min(...state.clipboard.map((node) => node.position.x));
+      const minY = Math.min(...state.clipboard.map((node) => node.position.y));
+      const maxX = Math.max(...state.clipboard.map((node) => node.position.x));
+      const maxY = Math.max(...state.clipboard.map((node) => node.position.y));
+
+      const width = Math.max(1, maxX - minX);
+      const height = Math.max(1, maxY - minY);
+
+      const offsetX = viewportCenter.x - minX - width / 2 + 20;
+      const offsetY = viewportCenter.y - minY - height / 2 + 20;
+
+      const clonedNodes = state.clipboard.map((node, index) => {
+        const newId = `${node.id}-copy-${Date.now()}-${index}`;
+        return {
+          ...node,
+          id: newId,
+          position: {
+            x: node.position.x + offsetX,
+            y: node.position.y + offsetY,
+          },
+          data:
+            typeof structuredClone === "function"
+              ? structuredClone(node.data)
+              : JSON.parse(JSON.stringify(node.data)),
+        };
+      });
+
+      return {
+        nodes: [...state.nodes, ...clonedNodes],
+        ...withHistoryUpdate(state, "node_add", {
+          nodes: state.nodes,
+          strokes: state.strokes,
+        }),
+      };
+    }),
 
   setStrokes: (strokes) => set({ strokes }),
 
@@ -187,6 +265,30 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     const targetSnapshot =
       snapshot ?? cloneSnapshot({ nodes: state.nodes, strokes: state.strokes });
     set(withHistoryUpdate(state, type, targetSnapshot));
+  },
+
+  exportCanvas: () => {
+    const state = get();
+    return {
+      version: "1.0.0",
+      nodes: cloneSnapshot({ nodes: state.nodes, strokes: [] }).nodes,
+      edges: state.edges,
+      strokes: cloneSnapshot({ nodes: [], strokes: state.strokes }).strokes,
+    };
+  },
+
+  importCanvas: (data) => {
+    const nodes = data.nodes ?? [];
+    const edges = data.edges ?? [];
+    const strokes = data.strokes ?? [];
+    set({
+      nodes,
+      edges,
+      strokes,
+      undoStack: [],
+      redoStack: [],
+      clipboard: [],
+    });
   },
 
   undo: () => {

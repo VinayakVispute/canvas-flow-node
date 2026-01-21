@@ -94,10 +94,10 @@ function TextNodeComponent({ id, data, selected }: TextNodeComponentProps) {
 
   const textStyle: React.CSSProperties = {
     fontSize: `${formatting.fontSize}px`,
+    fontFamily: formatting.fontFamily,
     fontWeight: formatting.bold ? "bold" : "normal",
     fontStyle: formatting.italic ? "italic" : "normal",
     color: formatting.color,
-    textAlign: formatting.alignment,
   };
 
   return (

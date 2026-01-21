@@ -7,6 +7,7 @@ import {
   Controls,
   useReactFlow,
   ReactFlowProvider,
+  type EdgeChange,
   type NodeChange,
   type Node,
   type NodeTypes,
@@ -18,6 +19,8 @@ import {
   type ImageNodeData,
   type ImageNodeType,
 } from "@/components/image-node";
+import { VideoNode, type VideoNodeData } from "@/components/video-node";
+import { FormNode, type FormNodeData } from "@/components/form-node";
 import {
   TextNode,
   type TextNodeData,
@@ -28,18 +31,23 @@ import { DrawingLayer, useDrawingStore } from "@/components/drawing-layer";
 import { useCanvasStore } from "@/lib/stores/canvas-store";
 import type { CanvasSnapshot } from "@/lib/stores/history-types";
 import { extractImageMetadata, fileToBase64 } from "@/lib/image-utils";
+import { downloadCanvasJSON, parseCanvasJSON } from "@/lib/canvas-io";
 import {
   downloadBlob,
   exportImageWithDrawings,
   getExportFilename,
 } from "@/lib/export-utils";
+import { extractVideoMetadata } from "@/lib/video-utils";
 
 const DEFAULT_IMAGE_URL =
   "https://d2weamipq0hk4d.cloudfront.net/assets/asset_1762153343464.webp";
+const DEFAULT_VIDEO_URL = "https://www.w3schools.com/html/mov_bbb.mp4";
 
 const nodeTypes: NodeTypes = {
   image: ImageNode,
   text: TextNode,
+  video: VideoNode,
+  form: FormNode,
 };
 
 function FlowCanvas() {
@@ -47,6 +55,7 @@ function FlowCanvas() {
   const [selectedImageNodes, setSelectedImageNodes] = useState<ImageNodeType[]>(
     []
   );
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition, getNode } = useReactFlow();
   const dragStartSnapshot = useRef<CanvasSnapshot | null>(null);
@@ -55,14 +64,20 @@ function FlowCanvas() {
 
   const {
     nodes,
+    edges,
     setNodes,
     applyNodeChanges,
+    applyEdgeChanges,
     addNodes,
     getSnapshot,
     pushHistory,
     undo,
     redo,
     strokes,
+    copyNodes,
+    pasteNodes,
+    exportCanvas,
+    importCanvas,
   } = useCanvasStore();
 
   // Drawing state
@@ -134,6 +149,13 @@ function FlowCanvas() {
     [applyNodeChanges, getSnapshot]
   );
 
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange[]) => {
+      applyEdgeChanges(changes);
+    },
+    [applyEdgeChanges]
+  );
+
   const onNodeDragStart = useCallback(() => {
     dragStartSnapshot.current = getSnapshot();
   }, [getSnapshot]);
@@ -143,7 +165,7 @@ function FlowCanvas() {
       if (!dragStartSnapshot.current) return;
 
       const previousNode = dragStartSnapshot.current.nodes.find(
-        (prevNode) => prevNode.id === node.id
+        (prevNode: Node) => prevNode.id === node.id
       );
       const positionChanged =
         !previousNode ||
@@ -161,10 +183,12 @@ function FlowCanvas() {
 
   const onSelectionChange = useCallback(
     ({ nodes: selectedNodes }: OnSelectionChangeParams) => {
-      const imageNodes = selectedNodes.filter(
-        (node) => node.type === "image"
+      const typedNodes = selectedNodes as Node[];
+      const imageNodes = typedNodes.filter(
+        (node: Node) => node.type === "image"
       ) as ImageNodeType[];
       setSelectedImageNodes(imageNodes);
+      setSelectedNodeIds(typedNodes.map((node: Node) => node.id));
     },
     []
   );
@@ -205,6 +229,44 @@ function FlowCanvas() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [undo, redo]);
+
+  // Copy/Paste selected nodes
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      ) {
+        return;
+      }
+
+      const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+      const modifierKey = isMac ? event.metaKey : event.ctrlKey;
+
+      if (modifierKey && event.key.toLowerCase() === "c") {
+        if (selectedNodeIds.length === 0) return;
+        event.preventDefault();
+        copyNodes(selectedNodeIds);
+      }
+
+      if (modifierKey && event.key.toLowerCase() === "v") {
+        event.preventDefault();
+        const bounds = reactFlowWrapper.current?.getBoundingClientRect();
+        if (!bounds) return;
+
+        const center = screenToFlowPosition({
+          x: bounds.left + bounds.width / 2,
+          y: bounds.top + bounds.height / 2,
+        });
+        pasteNodes(center);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedNodeIds, copyNodes, pasteNodes, screenToFlowPosition]);
 
   // Capture resize end to push history once
   useEffect(() => {
@@ -292,6 +354,67 @@ function FlowCanvas() {
     addNodes([newNode]);
   }, [addNodes]);
 
+  const handleAddVideo = useCallback(async () => {
+    try {
+      const metadata = await extractVideoMetadata(DEFAULT_VIDEO_URL);
+      const maxSize = 400;
+      let width = metadata.width;
+      let height = metadata.height;
+
+      if (width > maxSize || height > maxSize) {
+        if (width > height) {
+          height = (height / width) * maxSize;
+          width = maxSize;
+        } else {
+          width = (width / height) * maxSize;
+          height = maxSize;
+        }
+      }
+
+      const newNode: Node<VideoNodeData> = {
+        id: `video-${Date.now()}`,
+        type: "video",
+        position: {
+          x: Math.random() * 300 + 120,
+          y: Math.random() * 200 + 140,
+        },
+        data: {
+          videoUrl: DEFAULT_VIDEO_URL,
+          metadata,
+        },
+        style: {
+          width,
+          height,
+        },
+      };
+
+      addNodes([newNode]);
+    } catch (error) {
+      console.error("Failed to add video node:", error);
+    }
+  }, [addNodes]);
+
+  const handleAddForm = useCallback(() => {
+    const newNode: Node<FormNodeData> = {
+      id: `form-${Date.now()}`,
+      type: "form",
+      position: {
+        x: Math.random() * 300 + 140,
+        y: Math.random() * 200 + 160,
+      },
+      data: {
+        submitted: false,
+        submission: null,
+      },
+      style: {
+        width: 280,
+        height: 240,
+      },
+    };
+
+    addNodes([newNode]);
+  }, [addNodes]);
+
   const resolveNodeSize = (node: ImageNodeType) => {
     const width =
       typeof node.width === "number"
@@ -330,6 +453,7 @@ function FlowCanvas() {
           height: node.data.metadata.height,
         },
         strokes,
+        nodes,
       });
 
       if (blob) {
@@ -338,7 +462,27 @@ function FlowCanvas() {
 
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
-  }, [selectedImageNodes, strokes, getNode]);
+  }, [selectedImageNodes, strokes, getNode, nodes]);
+
+  const handleExportCanvas = useCallback(() => {
+    const payload = exportCanvas();
+    downloadCanvasJSON(payload);
+  }, [exportCanvas]);
+
+  const handleImportCanvas = useCallback(
+    async (file: File) => {
+      try {
+        const payload = await parseCanvasJSON(file);
+        importCanvas(payload);
+        setSelectedImageNodes([]);
+        setSelectedNodeIds([]);
+        deselectAllStrokes();
+      } catch (error) {
+        console.error("Failed to import canvas:", error);
+      }
+    },
+    [importCanvas, deselectAllStrokes]
+  );
 
   const onDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -370,7 +514,7 @@ function FlowCanvas() {
       if (files.length === 0) return;
 
       // Filter for image files only
-      const imageFiles = Array.from(files).filter((file) =>
+      const imageFiles = (Array.from(files) as File[]).filter((file: File) =>
         file.type.startsWith("image/")
       );
 
@@ -472,12 +616,16 @@ function FlowCanvas() {
       {/* Canvas Toolbar */}
       <CanvasToolbar
         onAddText={handleAddText}
+        onAddVideo={handleAddVideo}
+        onAddForm={handleAddForm}
         onExportSelected={handleExportSelected}
         selectedImageCount={selectedImageNodes.length}
         cursorMode={cursorMode}
         isSpaceHeld={isSpaceHeld}
         isDrawingMode={isDrawingMode}
         onToggleCursorMode={handleToggleCursorMode}
+        onExportCanvas={handleExportCanvas}
+        onImportCanvas={handleImportCanvas}
       />
 
       {/* Drop Zone Overlay */}
@@ -496,8 +644,10 @@ function FlowCanvas() {
 
       <ReactFlow
         nodes={nodes}
+        edges={edges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
         onSelectionChange={onSelectionChange}
         onPaneClick={handlePaneClick}
         onNodeDragStart={onNodeDragStart}

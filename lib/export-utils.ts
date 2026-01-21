@@ -1,7 +1,9 @@
 "use client";
 
+import type { Node } from "@xyflow/react";
 import type { Stroke } from "@/components/drawing-layer";
 import { pointsToSmoothPath } from "@/components/drawing-layer";
+import { defaultFormatting, type TextNodeData } from "@/components/text-node";
 
 export interface ExportOptions {
   imageUrl: string;
@@ -9,9 +11,17 @@ export interface ExportOptions {
   imageSize: { width: number; height: number };
   originalSize: { width: number; height: number };
   strokes: Stroke[];
+  nodes?: Node[];
 }
 
 interface Bounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+interface Rect {
   x: number;
   y: number;
   width: number;
@@ -49,7 +59,14 @@ export function getStrokesInBounds(
 export async function exportImageWithDrawings(
   options: ExportOptions
 ): Promise<Blob | null> {
-  const { imageUrl, imagePosition, imageSize, originalSize, strokes } = options;
+  const {
+    imageUrl,
+    imagePosition,
+    imageSize,
+    originalSize,
+    strokes,
+    nodes = [],
+  } = options;
 
   if (imageSize.width <= 0 || imageSize.height <= 0) return null;
 
@@ -63,6 +80,9 @@ export async function exportImageWithDrawings(
   try {
     const img = await loadImage(imageUrl);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    if (document.fonts?.ready) {
+      await document.fonts.ready;
+    }
   } catch {
     return null;
   }
@@ -113,6 +133,62 @@ export async function exportImageWithDrawings(
     });
 
     ctx.restore();
+  }
+
+  if (nodes.length > 0) {
+    const textNodes = nodes.filter((node) => node.type === "text");
+    if (textNodes.length > 0) {
+      ctx.save();
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+
+      textNodes.forEach((node) => {
+        const data = node.data as TextNodeData;
+        const formatting = data.formatting ?? defaultFormatting;
+        const text = data.text ?? "";
+        if (!text) return;
+
+        const fontSize = Math.max(1, formatting.fontSize * strokeScale);
+        const fontWeight = formatting.bold ? "bold" : "normal";
+        const fontStyle = formatting.italic ? "italic" : "normal";
+        const fontFamily = formatting.fontFamily || defaultFormatting.fontFamily;
+
+        ctx.font = `${fontStyle} ${fontWeight} ${fontSize}px ${fontFamily}`;
+        ctx.fillStyle = formatting.color || defaultFormatting.color;
+
+        const metrics = ctx.measureText(text);
+        const textWidth = metrics.width / strokeScale;
+        const textHeight = formatting.fontSize * 1.2;
+
+        const nodeRect: Rect = {
+          x: node.position.x,
+          y: node.position.y,
+          width: textWidth,
+          height: textHeight,
+        };
+
+        const boundsRect: Rect = {
+          x: imagePosition.x,
+          y: imagePosition.y,
+          width: imageSize.width,
+          height: imageSize.height,
+        };
+
+        const intersects =
+          nodeRect.x < boundsRect.x + boundsRect.width &&
+          nodeRect.x + nodeRect.width > boundsRect.x &&
+          nodeRect.y < boundsRect.y + boundsRect.height &&
+          nodeRect.y + nodeRect.height > boundsRect.y;
+
+        if (!intersects) return;
+
+        const drawX = (node.position.x - imagePosition.x) * scaleX;
+        const drawY = (node.position.y - imagePosition.y) * scaleY;
+        ctx.fillText(text, drawX, drawY);
+      });
+
+      ctx.restore();
+    }
   }
 
   return new Promise((resolve) => {

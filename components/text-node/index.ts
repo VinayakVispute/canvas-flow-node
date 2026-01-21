@@ -1,4 +1,4 @@
 export { TextNode } from "./TextNode";
 export { TextFormatToolbar } from "./TextFormatToolbar";
-export { defaultFormatting } from "./types";
-export type { TextNodeData, TextFormatting, TextAlignment } from "./types";
+export { defaultFormatting, FONT_FAMILIES } from "./types";
+export type { TextNodeData, TextFormatting } from "./types";
