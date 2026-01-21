@@ -656,6 +656,8 @@ function FlowCanvas() {
         fitViewOptions={{ padding: 0.2 }}
         className="bg-background"
         proOptions={{ hideAttribution: true }}
+        // Prevent selected nodes from being elevated above others
+        elevateNodesOnSelect={false}
         // Disable pan and selection when in drawing mode
         panOnDrag={effectiveMode === "grab" || isDrawingMode}
         selectionOnDrag={effectiveMode === "pointer" && !isDrawingMode}

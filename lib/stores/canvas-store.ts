@@ -23,6 +23,7 @@ interface CanvasStoreState {
   undoStack: HistoryEntry[];
   redoStack: HistoryEntry[];
   clipboard: Node[];
+  nextZIndex: number;
 }
 
 interface CanvasStoreActions {
@@ -99,8 +100,16 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   undoStack: [],
   redoStack: [],
   clipboard: [],
+  nextZIndex: 1,
 
-  setNodes: (nodes) => set({ nodes }),
+  setNodes: (nodes) => {
+    // Calculate next z-index from existing nodes
+    const maxZ = nodes.reduce((max, node) => {
+      const z = node.zIndex ?? 0;
+      return z > max ? z : max;
+    }, 0);
+    set({ nodes, nextZIndex: maxZ + 1 });
+  },
   setEdges: (edges) => set({ edges }),
 
   applyNodeChanges: (changes) => {
@@ -129,13 +138,21 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
   },
 
   addNodes: (nodes) =>
-    set((state) => ({
-      nodes: [...state.nodes, ...nodes],
-      ...withHistoryUpdate(state, "node_add", {
-        nodes: state.nodes,
-        strokes: state.strokes,
-      }),
-    })),
+    set((state) => {
+      // Assign incrementing z-index to new nodes
+      const nodesWithZIndex = nodes.map((node, index) => ({
+        ...node,
+        zIndex: state.nextZIndex + index,
+      }));
+      return {
+        nodes: [...state.nodes, ...nodesWithZIndex],
+        nextZIndex: state.nextZIndex + nodes.length,
+        ...withHistoryUpdate(state, "node_add", {
+          nodes: state.nodes,
+          strokes: state.strokes,
+        }),
+      };
+    }),
 
   deleteNodes: (nodeIds) =>
     set((state) => ({
@@ -190,6 +207,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
             x: node.position.x + offsetX,
             y: node.position.y + offsetY,
           },
+          zIndex: state.nextZIndex + index,
           data:
             typeof structuredClone === "function"
               ? structuredClone(node.data)
@@ -199,6 +217,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
 
       return {
         nodes: [...state.nodes, ...clonedNodes],
+        nextZIndex: state.nextZIndex + clonedNodes.length,
         ...withHistoryUpdate(state, "node_add", {
           nodes: state.nodes,
           strokes: state.strokes,
@@ -281,6 +300,11 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     const nodes = data.nodes ?? [];
     const edges = data.edges ?? [];
     const strokes = data.strokes ?? [];
+    // Calculate next z-index from imported nodes
+    const maxZ = nodes.reduce((max, node) => {
+      const z = node.zIndex ?? 0;
+      return z > max ? z : max;
+    }, 0);
     set({
       nodes,
       edges,
@@ -288,6 +312,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
       undoStack: [],
       redoStack: [],
       clipboard: [],
+      nextZIndex: maxZ + 1,
     });
   },
 
